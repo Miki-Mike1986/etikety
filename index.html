@@ -1,0 +1,128 @@
+
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Etiketovací aplikace</title>
+  <script src="https://labelary.github.io/browser-print-js/js/BrowserPrint-3.0.216.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qz-tray/2.1.0/qz-tray.js"></script>
+  <style>
+    :root{--primary:#1976d2;--primary-dark:#1251a1;--bg:#f4f4f4;--green:#e8fbe8;--card:#fff;--numpad:#fff5e6}
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:Arial,Helvetica,sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;background:var(--green);transition:background .3s;padding-bottom:40px}
+    body.step-ean{background:var(--bg)}
+    h2{margin:90px 0 28px;font-size:28px;font-weight:600;text-align:center;color:#333}
+    .language-select{display:flex;flex-direction:column;align-items:center;gap:18px;margin-bottom:32px}
+    .lang-btn{width:240px;height:70px;border:2px solid #ddd;border-radius:12px;background:#fff;font-size:18px;display:flex;align-items:center;justify-content:center;gap:10px;cursor:pointer;transition:.2s}
+    .lang-btn:hover{background:#eaeaea}.flag{height:26px}
+    #langToggle{position:fixed;top:14px;right:14px;width:46px;height:46px;border:none;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.15);font-size:22px;cursor:pointer;z-index:50}
+    #searchBar{display:none;text-align:center;margin-bottom:24px}
+    #eanInput{width:260px;font-size:22px;padding:12px;border:1px solid #bbb;border-radius:8px;margin-right:8px}
+    #searchBtn,#resetBtn{font-size:18px;padding:12px 20px;border:none;border-radius:8px;cursor:pointer}
+    #searchBtn{background:var(--primary);color:#fff}#searchBtn:hover{background:var(--primary-dark)}
+    #resetBtn{background:#ddd}
+    #result{margin-top:20px;width:96%;max-width:920px}
+    .card{background:var(--card);border-radius:14px;box-shadow:0 3px 8px rgba(0,0,0,.12);padding:26px;margin-bottom:28px;text-align:left}
+    .label{font-weight:600;margin-right:4px}
+    .mutace-grid{display:flex;flex-wrap:wrap;gap:12px;margin-top:14px}
+    .country-btn{border:1px solid #ddd;background:#fff;border-radius:8px;padding:8px 14px;font-size:16px;display:inline-flex;align-items:center;gap:6px;cursor:pointer;transition:.2s}.country-btn:hover{background:#eee}
+    .qty-wrap{background:var(--numpad);border-radius:12px;padding:20px;margin-top:20px;display:flex;flex-direction:column;align-items:center}
+    .qty-display{font-size:36px;font-weight:bold;margin-bottom:20px}
+    .numpad{display:grid;grid-template-columns:repeat(3,90px);gap:16px;justify-content:center;margin-bottom:16px}
+    .pad-btn{height:90px;font-size:26px;border:none;border-radius:10px;background:#e0e0e0;cursor:pointer;transition:.2s}.pad-btn:hover{background:#d0d0d0}
+    .print-btn{padding:14px 36px;font-size:22px;border:none;border-radius:10px;background:var(--primary);color:#fff;cursor:pointer;transition:.2s}.print-btn:hover{background:var(--primary-dark)}
+  </style>
+</head>
+<body class="step-lang">
+  <button id="langToggle" title="Změnit jazyk">🌐</button>
+  <h2 id="stepTitle">Výběr jazyka</h2>
+  <div id="langSelect" class="language-select">
+    <button class="lang-btn" data-lang="cs"><img class="flag" src="https://flagcdn.com/24x18/cz.png">Čeština</button>
+    <button class="lang-btn" data-lang="de"><img class="flag" src="https://flagcdn.com/24x18/de.png">Deutsch</button>
+    <button class="lang-btn" data-lang="ua"><img class="flag" src="https://flagcdn.com/24x18/ua.png">Українська</button>
+    <button class="lang-btn" data-lang="en"><img class="flag" src="https://flagcdn.com/24x18/gb.png">English</button>
+  </div>
+
+  <div id="searchBar">
+    <input id="eanInput" />
+    <button id="resetBtn">⟲</button>
+    <button id="searchBtn"></button>
+  </div>
+
+  <div id="result"></div>
+
+<script>
+(()=>{
+  const i18n={cs:{selLang:'Výběr jazyka',enterEAN:'Zadej EAN kód',search:'Hledat',eanPh:'Zadej EAN kód',notFound:'EAN nenalezen',loading:'Načítám…',mutTitle:'Jazykové mutace',id:'ID',size:'Label size',type:'Typ zboží',print:'🖨️ Tisk',qty0:'0',alertEAN:'Zadejte EAN'}};
+  let lang='cs';const t=k=>i18n[lang][k]||k;
+
+  const printerMap = {
+    "58x40": "Zebra_58mm",
+    "100x150": "Zebra_100mm",
+    "40x20": "Zebra_40mm"
+  };
+
+  async function printLabel(row, qty) {
+    const size = (row['Label size'] || '').trim();
+    const printer = printerMap[size];
+    if (!printer) {
+      alert(`Není přiřazena tiskárna pro rozměr: ${size}`);
+      return;
+    }
+
+    const lines = [];
+    for (let i = 0; i < parseInt(qty || '1'); i++) {
+      lines.push(
+        '^XA',
+        `^FO50,50^A0N,40,40^FD${row['Název produktu'] || row.Name}^FS`,
+        `^FO50,100^A0N,30,30^FDEAN: ${row.EAN}^FS`,
+        '^XZ'
+      );
+    }
+
+    try {
+      await qz.websocket.connect();
+      const config = qz.configs.create(printer);
+      await qz.print(config, lines);
+      await qz.websocket.disconnect();
+    } catch (err) {
+      alert('Chyba při tisku: ' + err);
+    }
+  }
+
+  const stepTitle=document.getElementById('stepTitle');
+  const langSelect=document.getElementById('langSelect');
+  const searchBar=document.getElementById('searchBar');
+  const eanInput=document.getElementById('eanInput');
+  const searchBtn=document.getElementById('searchBtn');
+  const resetBtn=document.getElementById('resetBtn');
+  const resultDiv=document.getElementById('result');
+  const clean=s=>String(s).replace(/[^0-9]/g,'').trim();
+  const flagISO=c=>(c||'').slice(0,2).toLowerCase();
+
+  function applyTexts(){stepTitle.textContent=t('selLang');eanInput.placeholder=t('eanPh');searchBtn.textContent=t('search');}
+  applyTexts();
+
+  function toLang(btn){lang=btn.dataset.lang;applyTexts();showEAN();}
+  document.querySelectorAll('.lang-btn').forEach(b=>b.onclick=function(){toLang(this);});
+  document.getElementById('langToggle').onclick=()=>{langSelect.style.display='flex';searchBar.style.display='none';resultDiv.innerHTML='';document.body.classList.remove('step-ean');applyTexts();};
+  function showEAN(){langSelect.style.display='none';searchBar.style.display='block';stepTitle.textContent=t('enterEAN');document.body.classList.add('step-ean');eanInput.focus();}
+  resetBtn.onclick=()=>{eanInput.value='';resultDiv.innerHTML='';eanInput.focus();};
+
+  let cache=null;async function sheet(){if(cache)return cache;const r=await fetch('https://opensheet.elk.sh/1OZ6xgh0IdQntCylrZWA7lJI4CGNVy7O_i53veTuNGLU/TEST');cache=await r.json();return cache;}
+  searchBtn.onclick=searchEAN;eanInput.addEventListener('keydown',e=>e.key==='Enter'&&searchEAN());
+  async function searchEAN(){const ean=clean(eanInput.value);if(!ean){alert(t('alertEAN'));return;}resultDiv.textContent=t('loading');const data=await sheet();const rows=data.filter(r=>clean(r.EAN)===ean);if(!rows.length){resultDiv.textContent=t('notFound');return;}const map={};rows.forEach(r=>{const c=r.Country||'--';(map[c]=map[c]||[]).push(r)});renderProduct(rows[0],map);}
+  function renderProduct(p,map){let html=`<div class='card'><h2 style='margin-top:0'>${p['Název produktu']||p.Name}</h2>`;html+=`<p><span class='label'>EAN:</span>${p.EAN}</p>`;html+=`<p><span class='label'>${t('id')}:</span>${p.ID||'-'}</p>`;html+=`<p><span class='label'>${t('size')}:</span>${p['Label size']||'-'}</p>`;html+=`<p><span class='label'>${t('type')}:</span>${p['Type of Goods']||'-'}</p>`;html+=`<h3>${t('mutTitle')}</h3><div class='mutace-grid'>`;for(const c in map){html+=`<button class='country-btn' data-c='${c}'><img class='flag' src='https://flagcdn.com/24x18/${flagISO(c)}.png'>${c}</button>`;}html+='</div><div id="countryDetails"></div></div>';resultDiv.innerHTML=html;resultDiv.dataset.map=JSON.stringify(map);}
+  let qty='',currentRow=null;
+  resultDiv.addEventListener('click',e=>{
+    const cb=e.target.closest('.country-btn');if(cb){const map=JSON.parse(resultDiv.dataset.map);currentRow=map[cb.dataset.c][0];showQty();}
+    const pad=e.target.closest('.pad-btn');if(pad)handlePad(pad.dataset.d);
+    if(e.target.closest('.print-btn')) printLabel(currentRow, qty);
+  });
+  function showQty(){qty='';let b=`<div class='qty-wrap'><div id='qtyDisplay' class='qty-display'>${t('qty0')}</div><div class='numpad'>`;'123456789C0*'.split('').forEach(d=>b+=`<button class='pad-btn' data-d='${d}'>${d}</button>`);b+=`</div><button class='print-btn'>${t('print')}</button></div>`;document.getElementById('countryDetails').innerHTML=b;}
+  function handlePad(d){if(d==='C')qty='';else if(d!=='*'&&qty.length<6)qty+=d;document.getElementById('qtyDisplay').textContent=qty||t('qty0');}
+})();
+</script>
+</body>
+</html>
